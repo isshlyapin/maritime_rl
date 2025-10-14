@@ -394,12 +394,12 @@ def train_model():
         lr=0.0005,
         gamma=0.99,
         buffer_size=100000,
-        batch_size=256,
+        batch_size=1024,
         target_update=1000
     )
     
     # Training parameters
-    num_episodes = 10000
+    num_episodes = 10_000
     epsilon_start = 1.0
     epsilon_end = 0.05
     epsilon_decay = 500_000
@@ -412,13 +412,12 @@ def train_model():
     print("Starting training...")
     
     epsilon = epsilon_start
+    episode_collisions = 0
     for episode in range(num_episodes):
         # Reset environment
         state = env.reset()
         total_reward = 0
-        episode_collisions = 0
         
-
         step_count = 0
         done = False
 
@@ -435,7 +434,7 @@ def train_model():
             
             # Update statistics
             total_reward += reward
-            if reward <= -5:  # Collision penalty
+            if reward < -5 + 1e-3:  # Collision penalty
                 episode_collisions += 1
     
             # Calculate current epsilon
@@ -446,7 +445,7 @@ def train_model():
         
         # Record statistics
         episode_rewards.append(total_reward)
-        collision_rate = episode_collisions / step_count if step_count > 0 else 0
+        collision_rate = episode_collisions / episode if episode > 0 else 0
         collision_rates.append(collision_rate)
         
         # Print progress
@@ -455,6 +454,12 @@ def train_model():
             avg_collision = np.mean(collision_rates[-100:])
             print(f"Episode {episode}, Avg Reward: {avg_reward:.2f}, "
                   f"Collision Rate: {avg_collision:.3f}, Epsilon: {epsilon:.3f}")
+            
+        # Save progress
+        if episode % 10 == 0:
+            name = "models/ship_collision_avoidance_model" + str(episode)
+            torch.save(agent.target_net.state_dict(), name)
+
     
     print("Training completed!")
     return agent, episode_rewards, collision_rates
@@ -503,7 +508,3 @@ if __name__ == "__main__":
     # Test the model
     test_env = MaritimeEnvironment(num_ships=500, k_nearest=5)
     test_rewards, test_collisions = test_model(trained_agent, test_env)
-    
-    # Save the model
-    torch.save(trained_agent.target_net.state_dict(), "ship_collision_avoidance_model.pth")
-    print("Model saved successfully!")
