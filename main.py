@@ -41,7 +41,7 @@ class DuelingDQN(nn.Module):
 
 class MultiShipCollisionAvoidance:
     def __init__(self, state_dim, action_dim, lr=0.0005, gamma=0.99, 
-                 buffer_size=100_000, batch_size=64, target_update=1_000):
+                 buffer_size=100_000, batch_size=64, target_update=1_000, weights = None):
         
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -57,6 +57,10 @@ class MultiShipCollisionAvoidance:
         # Networks
         self.policy_net = DuelingDQN(state_dim, action_dim).to(self.device)
         self.target_net = DuelingDQN(state_dim, action_dim).to(self.device)
+
+        if weights is not None:
+            self.policy_net.load_state_dict(torch.load(weights))
+
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         
@@ -73,14 +77,14 @@ class MultiShipCollisionAvoidance:
         """Select action using epsilon-greedy policy with Double DQN"""
         if random.random() < epsilon:
             idx_action = random.randrange(self.action_dim)
-            print(f"[DEBUG] Select action: random choise = {idx_action}")
+            # print(f"[DEBUG] Select action: random choise = {idx_action}")
             return idx_action
         else:
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
                 q_values = self.policy_net(state_tensor)
                 idx_action = q_values.argmax().item()
-                print(f"[DEBUG] Select action: network choise = {idx_action}")
+                # print(f"[DEBUG] Select action: network choise = {idx_action}")
                 return idx_action
     
     def store_transition(self, state, action, reward, next_state, done):
@@ -116,7 +120,7 @@ class MultiShipCollisionAvoidance:
         
         # Compute loss
         loss = F.mse_loss(current_q_values, target_q_values)
-        print(f"[DEBUG] Loss: {loss}")
+        # print(f"[DEBUG] Loss: {loss}")
         
         # Optimize
         self.optimizer.zero_grad()
@@ -137,7 +141,9 @@ class MultiShipCollisionAvoidance:
         if self.steps_done > self.target_update:
             self.target_net.load_state_dict(self.policy_net.state_dict())
             self.target_update *= 2
+            print()
             print(f"[DEBUG] Target network updated at step {self.steps_done}")
+            print()
         
         # Return debug info
         # debug_info = {
@@ -200,13 +206,11 @@ class MaritimeEnvironment:
                 'desired_speed': 7
             }
             self.ships.append(ship)
-        
+        print(f"  [RESET] Initial position: ({ship['x']:.1f}, {ship['y']:.1f})")
+        print(f"  [RESET] Target position: ({ship['target_x']:.1f}, {ship['target_y']:.1f})")
         # if verbose:
         #     ship = self.ships[0]
         #     dist_to_target = math.sqrt((ship['target_x'] - ship['x'])**2 + (ship['target_y'] - ship['y'])**2)
-        #     print(f"  [RESET] Initial distance to target: {dist_to_target:.1f}m")
-        #     print(f"  [RESET] Initial position: ({ship['x']:.1f}, {ship['y']:.1f})")
-        #     print(f"  [RESET] Target position: ({ship['target_x']:.1f}, {ship['target_y']:.1f})")
         
         return self._get_state(0, verbose=verbose)  # Return state for ship 0
     
@@ -304,30 +308,38 @@ class MaritimeEnvironment:
                 risk = 0.0
             
             max_risk = min(max_risk, risk)
-        
+
         return max_risk
     
-    def _calculate_reward(self, ship_idx, action, verbose=False):
+    def _calculate_reward(self, ship_idx, state, action, next_state, verbose=False):
         """Calculate reward for a ship's action"""
         ship = self.ships[ship_idx]
         
         # Collision avoidance reward
-        r_ca = self._calculate_collision_risk(ship_idx)
+        r_ca = self._calculate_collision_risk(ship_idx) * 10
         
         # Navigation efficiency reward
         dx = ship['target_x'] - ship['x']
         dy = ship['target_y'] - ship['y']
         desired_heading = math.degrees(math.atan2(dy, dx))
 
+        d1 = math.sqrt(state[0]**2 + state[1]**2)
+        d2 = math.sqrt(next_state[0]**2 + next_state[1]**2)
+        
+        dd = d1 - d2
+
         speed_dev = abs(ship['speed'] - ship['desired_speed']) / self.max_speed
         heading_dev = abs(self._normalize_angle_180(ship['heading'] - desired_heading)) / 180.0
-        r_ne = - (speed_dev + heading_dev) / 2
+        r_ne = - (speed_dev + heading_dev) / 2 + dd*100
         
         # COLREGs compliance reward (simplified)
         r_ce = self._check_colregs_compliance(ship_idx)
         
         # Combined reward with weights from paper
-        alpha, beta, gamma = 0.4, 0.4, 0.2
+        # alpha, beta, gamma = 0.4, 0.4, 0.2
+        # alpha, beta, gamma = 0, 1, 0
+        alpha, beta, gamma = 0.5, 0.5, 0
+
         total_reward = alpha * r_ca + beta * r_ne + gamma * r_ce
         
         # if verbose:
@@ -368,6 +380,8 @@ class MaritimeEnvironment:
         """Execute action for a ship and return next state, reward, done"""
         dt = 1.0  # time step in seconds
 
+        state = self._get_state(0)
+
         for idx, ship in enumerate(self.ships):
             if idx == ship_idx:
                 speed_idx = action // len(self.heading_changes)
@@ -381,8 +395,10 @@ class MaritimeEnvironment:
 
             self._apply_ship_motion(ship, delta_speed, delta_heading, dt)
         
+        next_state = self._get_state(0)
+ 
         # Calculate reward
-        reward = self._calculate_reward(ship_idx, action, verbose=verbose)
+        reward = self._calculate_reward(ship_idx, state, action, next_state, verbose=verbose)
         
         # Check if episode is done
         self.time_step += 1
@@ -401,10 +417,13 @@ class MaritimeEnvironment:
             (ship['x'] - ship['target_x'])**2 +
             (ship['y'] - ship['target_y'])**2
         )
-        if target_d < 50:
-            reward = 5
+        if target_d < 5:
+            reward = 100
             done = True
             termination_reason = "goal_reached"
+            print(f"  [FINISH] Initial position: ({ship['x']:.1f}, {ship['y']:.1f})")
+            print(f"  [FINISH] Target position: ({ship['target_x']:.1f}, {ship['target_y']:.1f})")
+
         
         if done and termination_reason is None:
             termination_reason = "max_steps"
@@ -453,11 +472,15 @@ def train_model():
     os.makedirs("models", exist_ok=True)
     
     # Environment parameters
-    num_ships = 25
     k_nearest = 5
+    num_ships = 3
     
     # Create environment and agent
-    env = MaritimeEnvironment(num_ships=num_ships, k_nearest=k_nearest)
+    env = MaritimeEnvironment(
+        num_ships=num_ships, 
+        k_nearest=k_nearest
+    )
+
     agent = MultiShipCollisionAvoidance(
         state_dim=env.state_dim,
         action_dim=env.action_dim,
@@ -465,10 +488,13 @@ def train_model():
         gamma=0.99,
         buffer_size=100_000,
         batch_size=64,
-        target_update=1_000
+        target_update=1_000,
+        weights="models/ship_collision_avoidance_model150.pth"
     )
     
+    print()
     print(f"Environment setup:")
+    print(f"  Env size: {env.size}")
     print(f"  State dimension: {env.state_dim}")
     print(f"  Action dimension: {env.action_dim}")
     print(f"  Number of ships: {num_ships}")
@@ -477,9 +503,9 @@ def train_model():
     
     # Training parameters
     num_episodes = 10_000
-    epsilon_start = 1.0
+    epsilon_start = 0.5
     epsilon_end = 0.05
-    epsilon_decay = 500_000
+    epsilon_decay = 100_000
     epsilon_decay_rate = (epsilon_start - epsilon_end) / epsilon_decay
     
     # Training statistics
@@ -562,7 +588,7 @@ def train_model():
             
             print(f"Episode {episode}/{num_episodes} | Steps: {step_count} | Reason: {termination_reason}")
             print(f"  Reward: {total_reward:.2f} (avg: {avg_reward:.2f}) | Epsilon: {epsilon:.3f}")
-            print(f"  Loss: {recent_loss:.4f} | Grad: {recent_grad_norm:.4f} | Q-mean: {recent_q:.4f}")
+            # print(f"  Loss: {recent_loss:.4f} | Grad: {recent_grad_norm:.4f} | Q-mean: {recent_q:.4f}")
             print(f"  Buffer: {buffer_size}/{agent.memory.maxlen} | Collisions: {avg_collision:.3f}")
             
             # if verbose:
@@ -575,7 +601,7 @@ def train_model():
             
         # Save progress
         if episode % 10 == 0:
-            name = "models/ship_collision_avoidance_model" + str(episode) + ".pth"
+            name = "models/v1_ship_collision_avoidance_model" + str(episode) + ".pth"
             torch.save(agent.target_net.state_dict(), name)
 
     
