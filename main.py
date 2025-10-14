@@ -103,7 +103,8 @@ class MultiShipCollisionAvoidance:
         
         # Double DQN: use policy net to select actions, target net to evaluate
         next_actions = self.policy_net(next_states).max(1)[1].unsqueeze(1)
-        next_q_values = self.target_net(next_states).gather(1, next_actions)
+        with torch.no_grad():
+            next_q_values = self.target_net(next_states).gather(1, next_actions)
         
         # Target Q values
         target_q_values = rewards + (self.gamma * next_q_values * ~dones)
@@ -160,7 +161,6 @@ class MaritimeEnvironment:
         
         # Ship parameters
         self.max_speed = 10           # meters
-        self.max_speed_change = 3     # meters
         self.max_heading_change = 30  # degrees
         
         # Safety parameters
@@ -185,10 +185,10 @@ class MaritimeEnvironment:
         self.ships = []
         for i in range(self.num_ships):
             ship = {
-                'x': random.uniform(-self.size, self.size),
-                'y': random.uniform(-self.size, self.size),
-                'target_x': random.uniform(-self.size, self.size),
-                'target_y': random.uniform(-self.size, self.size),
+                'x': random.uniform(0, self.size),
+                'y': random.uniform(0, self.size),
+                'target_x': random.uniform(0, self.size),
+                'target_y': random.uniform(0, self.size),
                 'speed': random.uniform(0, self.max_speed),
                 'heading': random.uniform(-180, 180),
                 'desired_speed': 7
@@ -447,7 +447,7 @@ def train_model():
     os.makedirs("models", exist_ok=True)
     
     # Environment parameters
-    num_ships = 7
+    num_ships = 25
     k_nearest = 5
     
     # Create environment and agent
@@ -516,6 +516,9 @@ def train_model():
             # Store transition
             agent.store_transition(state, action, reward, next_state, done)
             
+            if len(agent.memory) < agent.batch_size:
+                continue
+
             # Update model
             debug_info = agent.update_model(verbose=step_verbose)
             
