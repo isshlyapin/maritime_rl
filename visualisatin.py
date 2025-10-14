@@ -11,12 +11,13 @@ class MaritimeVisualizer:
     def __init__(self, env, ship_idx=0):
         self.env = env
         self.ship_idx = ship_idx
+        self.ship_size = 5
 
         # Создаем фигуру
         self.fig, self.ax = plt.subplots()
-        self.ship_points, = self.ax.plot([], [], 'bo', label='Ships')
+        self.ship_points, = self.ax.plot([], [], 'bo', markersize=self.ship_size, label='Ships')
         self.target_points, = self.ax.plot([], [], 'rx', label='Targets')
-        self.main_ship_point, = self.ax.plot([], [], 'go', markersize=10, label='Main Ship')
+        self.main_ship_point, = self.ax.plot([], [], 'go', markersize=self.ship_size, label='Main Ship')
         self.heading_arrows = []
 
         # Камера
@@ -32,7 +33,7 @@ class MaritimeVisualizer:
 
         # Устанавливаем начальные границы камеры по главному кораблю
         main_ship = self.env.ships[self.ship_idx]
-        camera_range = 500
+        camera_range = self.env.size
         self.xlim = (main_ship['x'] - camera_range, main_ship['x'] + camera_range)
         self.ylim = (main_ship['y'] - camera_range, main_ship['y'] + camera_range)
         self.ax.set_xlim(*self.xlim)
@@ -57,8 +58,8 @@ class MaritimeVisualizer:
 
     def update_camera(self, main_ship):
         """Плавная камера с deadzone"""
-        deadzone = 50
-        smooth_factor = 0.2
+        deadzone = self.env.size // 5
+        smooth_factor = 1
 
         x_min, x_max = self.xlim
         y_min, y_max = self.ylim
@@ -84,6 +85,9 @@ class MaritimeVisualizer:
 
     def update(self, frame):
         """Обновление кадра"""
+        main_ship = self.env.ships[self.ship_idx]
+        self.update_camera(main_ship)
+
         xs = [ship['x'] for ship in self.env.ships]
         ys = [ship['y'] for ship in self.env.ships]
 
@@ -96,14 +100,11 @@ class MaritimeVisualizer:
         self.ship_points.set_data(xs, ys)
         self.target_points.set_data(txs, tys)
 
-        main_ship = self.env.ships[self.ship_idx]
         self.main_ship_point.set_data([main_ship['x']], [main_ship['y']])
 
         # Обновляем стрелки направления
         self._draw_arrows()
 
-        # Движение камеры
-        #self.update_camera(main_ship)
 
         return self.ship_points, self.target_points, self.main_ship_point, *self.heading_arrows
 
@@ -176,6 +177,7 @@ def load_environment_template(env, template_name):
             'desired_speed': ship_info.get('desired_speed', 7)
         }
         env.ships.append(ship)
+        print(ship)
     
     # Сбрасываем счётчик времени
     env.time_step = 0
@@ -194,7 +196,7 @@ if __name__ == "__main__":
         action_dim=env.action_dim
     )
 
-    model = "ship_collision_avoidance_model320.pth"
+    model = "ship_collision_avoidance_model270.pth"
 
     agent.target_net.load_state_dict(torch.load("models/" + model))
     agent.target_net.eval()
