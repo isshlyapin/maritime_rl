@@ -226,6 +226,14 @@ class MaritimeEnvironment:
         
         return np.array(state, dtype=np.float32)
 
+    def _apply_ship_motion(self, ship, delta_speed, delta_heading, dt=1.0):
+        """Применить изменения скорости и курса и обновить позицию"""
+        ship['speed'] = max(0.0, min(self.max_speed, ship['speed'] + delta_speed))
+        ship['heading'] = self._normalize_angle_180(ship['heading'] + delta_heading)
+
+        ship['x'] += ship['speed'] * math.cos(math.radians(ship['heading'])) * dt
+        ship['y'] += ship['speed'] * math.sin(math.radians(ship['heading'])) * dt
+
     def _calculate_collision_risk(self, ship_idx):
         """Calculate collision risk for a ship"""
         ship = self.ships[ship_idx]
@@ -308,23 +316,20 @@ class MaritimeEnvironment:
     
     def step(self, ship_idx, action):
         """Execute action for a ship and return next state, reward, done"""
-        ship = self.ships[ship_idx]
-        
-        # Decode action
-        speed_idx = action // len(self.heading_changes)
-        heading_idx = action % len(self.heading_changes)
-        
-        delta_speed = self.speed_changes[speed_idx]
-        delta_heading = self.heading_changes[heading_idx]
-        
-        # Update ship state
-        ship['speed'] = max(0, min(self.max_speed, ship['speed'] + delta_speed))
-        ship['heading'] = self._normalize_angle_180(ship['heading'] + delta_heading)
-        
-        # Update position based on speed and heading
         dt = 1.0  # time step in seconds
-        ship['x'] += ship['speed'] * math.cos(math.radians(ship['heading'])) * dt
-        ship['y'] += ship['speed'] * math.sin(math.radians(ship['heading'])) * dt
+
+        for idx, ship in enumerate(self.ships):
+            if idx == ship_idx:
+                speed_idx = action // len(self.heading_changes)
+                heading_idx = action % len(self.heading_changes)
+
+                delta_speed = self.speed_changes[speed_idx]
+                delta_heading = self.heading_changes[heading_idx]
+            else:
+                delta_speed = 0.0
+                delta_heading = 0.0
+
+            self._apply_ship_motion(ship, delta_speed, delta_heading, dt)
         
         # Calculate reward
         reward = self._calculate_reward(ship_idx, action)
