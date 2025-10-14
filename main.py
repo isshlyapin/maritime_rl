@@ -45,6 +45,7 @@ class MultiShipCollisionAvoidance:
         
         self.state_dim = state_dim
         self.action_dim = action_dim
+
         self.gamma = gamma
         self.batch_size = batch_size
         self.target_update = target_update
@@ -71,12 +72,16 @@ class MultiShipCollisionAvoidance:
     def select_action(self, state, epsilon):
         """Select action using epsilon-greedy policy with Double DQN"""
         if random.random() < epsilon:
-            return random.randrange(self.action_dim)
+            idx_action = random.randrange(self.action_dim)
+            print(f"[DEBUG] Select action: random choise = {idx_action}")
+            return idx_action
         else:
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
                 q_values = self.policy_net(state_tensor)
-                return q_values.argmax().item()
+                idx_action = q_values.argmax().item()
+                print(f"[DEBUG] Select action: network choise = {idx_action}")
+                return idx_action
     
     def store_transition(self, state, action, reward, next_state, done):
         """Store experience in replay buffer"""
@@ -103,49 +108,51 @@ class MultiShipCollisionAvoidance:
         
         # Double DQN: use policy net to select actions, target net to evaluate
         next_actions = self.policy_net(next_states).max(1)[1].unsqueeze(1)
-        next_q_values = self.target_net(next_states).gather(1, next_actions)
+        with torch.no_grad():
+            next_q_values = self.target_net(next_states).gather(1, next_actions)
         
         # Target Q values
         target_q_values = rewards + (self.gamma * next_q_values * ~dones)
         
         # Compute loss
         loss = F.mse_loss(current_q_values, target_q_values)
+        print(f"[DEBUG] Loss: {loss}")
         
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
         
-        # Calculate gradient norm for debugging
-        total_norm = 0
-        for p in self.policy_net.parameters():
-            if p.grad is not None:
-                param_norm = p.grad.data.norm(2)
-                total_norm += param_norm.item() ** 2
-        total_norm = total_norm ** 0.5
+        # # Calculate gradient norm for debugging
+        # total_norm = 0
+        # for p in self.policy_net.parameters():
+        #     if p.grad is not None:
+        #         param_norm = p.grad.data.norm(2)
+        #         total_norm += param_norm.item() ** 2
+        # total_norm = total_norm ** 0.5
         
         self.optimizer.step()
         
         # Update target network
-        self.steps_done += 1
-        if self.steps_done % self.target_update == 0:
+        self.steps_done += self.batch_size
+        if self.steps_done > self.target_update:
             self.target_net.load_state_dict(self.policy_net.state_dict())
-            if verbose:
-                print(f"  [DEBUG] Target network updated at step {self.steps_done}")
+            self.target_update *= 2
+            print(f"[DEBUG] Target network updated at step {self.steps_done}")
         
         # Return debug info
-        debug_info = {
-            'loss': loss.item(),
-            'grad_norm': total_norm,
-            'q_mean': current_q_values.mean().item(),
-            'q_std': current_q_values.std().item(),
-            'q_max': current_q_values.max().item(),
-            'q_min': current_q_values.min().item(),
-            'target_q_mean': target_q_values.mean().item(),
-            'reward_mean': rewards.mean().item(),
-            'reward_std': rewards.std().item(),
-        }
+        # debug_info = {
+        #     'loss': loss.item(),
+        #     'grad_norm': total_norm,
+        #     'q_mean': current_q_values.mean().item(),
+        #     'q_std': current_q_values.std().item(),
+        #     'q_max': current_q_values.max().item(),
+        #     'q_min': current_q_values.min().item(),
+        #     'target_q_mean': target_q_values.mean().item(),
+        #     'reward_mean': rewards.mean().item(),
+        #     'reward_std': rewards.std().item(),
+        # }
         
-        return debug_info
+        # return debug_info
 
 
 class MaritimeEnvironment:
@@ -160,7 +167,6 @@ class MaritimeEnvironment:
         
         # Ship parameters
         self.max_speed = 10           # meters
-        self.max_speed_change = 3     # meters
         self.max_heading_change = 30  # degrees
         
         # Safety parameters
@@ -185,22 +191,22 @@ class MaritimeEnvironment:
         self.ships = []
         for i in range(self.num_ships):
             ship = {
-                'x': random.uniform(-self.size, self.size),
-                'y': random.uniform(-self.size, self.size),
-                'target_x': random.uniform(-self.size, self.size),
-                'target_y': random.uniform(-self.size, self.size),
+                'x': random.uniform(0, self.size),
+                'y': random.uniform(0, self.size),
+                'target_x': random.uniform(0, self.size),
+                'target_y': random.uniform(0, self.size),
                 'speed': random.uniform(0, self.max_speed),
                 'heading': random.uniform(-180, 180),
                 'desired_speed': 7
             }
             self.ships.append(ship)
         
-        if verbose:
-            ship = self.ships[0]
-            dist_to_target = math.sqrt((ship['target_x'] - ship['x'])**2 + (ship['target_y'] - ship['y'])**2)
-            print(f"  [RESET] Initial distance to target: {dist_to_target:.1f}m")
-            print(f"  [RESET] Initial position: ({ship['x']:.1f}, {ship['y']:.1f})")
-            print(f"  [RESET] Target position: ({ship['target_x']:.1f}, {ship['target_y']:.1f})")
+        # if verbose:
+        #     ship = self.ships[0]
+        #     dist_to_target = math.sqrt((ship['target_x'] - ship['x'])**2 + (ship['target_y'] - ship['y'])**2)
+        #     print(f"  [RESET] Initial distance to target: {dist_to_target:.1f}m")
+        #     print(f"  [RESET] Initial position: ({ship['x']:.1f}, {ship['y']:.1f})")
+        #     print(f"  [RESET] Target position: ({ship['target_x']:.1f}, {ship['target_y']:.1f})")
         
         return self._get_state(0, verbose=verbose)  # Return state for ship 0
     
@@ -257,10 +263,10 @@ class MaritimeEnvironment:
         
         state_array = np.array(state, dtype=np.float32)
         
-        if verbose:
-            print(f"  [STATE] Raw state (first 7 dims): {state_array[:7]}")
-            print(f"  [STATE] State range: [{state_array.min():.3f}, {state_array.max():.3f}]")
-            print(f"  [STATE] State mean: {state_array.mean():.3f}, std: {state_array.std():.3f}")
+        # if verbose:
+        #     print(f"  [STATE] Raw state (first 7 dims): {state_array[:7]}")
+        #     print(f"  [STATE] State range: [{state_array.min():.3f}, {state_array.max():.3f}]")
+        #     print(f"  [STATE] State mean: {state_array.mean():.3f}, std: {state_array.std():.3f}")
         
         return state_array
 
@@ -324,11 +330,11 @@ class MaritimeEnvironment:
         alpha, beta, gamma = 0.4, 0.4, 0.2
         total_reward = alpha * r_ca + beta * r_ne + gamma * r_ce
         
-        if verbose:
-            dist_to_target = math.sqrt(dx**2 + dy**2)
-            print(f"  [REWARD] r_ca={r_ca:.3f}, r_ne={r_ne:.3f}, r_ce={r_ce:.3f}, total={total_reward:.3f}")
-            print(f"  [STATE] speed={ship['speed']:.2f}, heading={ship['heading']:.1f}°, dist_to_target={dist_to_target:.1f}m")
-            print(f"  [DEVIATIONS] speed_dev={speed_dev:.3f}, heading_dev={heading_dev:.3f}")
+        # if verbose:
+        #     dist_to_target = math.sqrt(dx**2 + dy**2)
+        #     print(f"  [REWARD] r_ca={r_ca:.3f}, r_ne={r_ne:.3f}, r_ce={r_ce:.3f}, total={total_reward:.3f}")
+        #     print(f"  [STATE] speed={ship['speed']:.2f}, heading={ship['heading']:.1f}°, dist_to_target={dist_to_target:.1f}m")
+        #     print(f"  [DEVIATIONS] speed_dev={speed_dev:.3f}, heading_dev={heading_dev:.3f}")
         
         return total_reward
     
@@ -405,8 +411,8 @@ class MaritimeEnvironment:
 
         next_state = self._get_state(ship_idx, verbose=verbose)
         
-        if verbose:
-            print(f"  [STEP] Action: speed_delta={delta_speed}, heading_delta={delta_heading}, reward={reward:.3f}, done={done}, reason={termination_reason}")
+        # if verbose:
+        #     print(f"  [STEP] Action: speed_delta={delta_speed}, heading_delta={delta_heading}, reward={reward:.3f}, done={done}, reason={termination_reason}")
         
         return next_state, reward, done, termination_reason
     
@@ -447,7 +453,7 @@ def train_model():
     os.makedirs("models", exist_ok=True)
     
     # Environment parameters
-    num_ships = 7
+    num_ships = 25
     k_nearest = 5
     
     # Create environment and agent
@@ -457,9 +463,9 @@ def train_model():
         action_dim=env.action_dim,
         lr=0.0005,
         gamma=0.99,
-        buffer_size=100000,
-        batch_size=1024,
-        target_update=1000
+        buffer_size=100_000,
+        batch_size=64,
+        target_update=1_000
     )
     
     print(f"Environment setup:")
@@ -516,13 +522,16 @@ def train_model():
             # Store transition
             agent.store_transition(state, action, reward, next_state, done)
             
+            if len(agent.memory) < agent.batch_size:
+                continue
+
             # Update model
-            debug_info = agent.update_model(verbose=step_verbose)
+            agent.update_model(verbose=step_verbose)
             
-            if debug_info is not None:
-                losses.append(debug_info['loss'])
-                grad_norms.append(debug_info['grad_norm'])
-                q_values_log.append(debug_info['q_mean'])
+            # if debug_info is not None:
+            #     losses.append(debug_info['loss'])
+            #     grad_norms.append(debug_info['grad_norm'])
+            #     q_values_log.append(debug_info['q_mean'])
             
             # Update statistics
             total_reward += reward
@@ -556,13 +565,13 @@ def train_model():
             print(f"  Loss: {recent_loss:.4f} | Grad: {recent_grad_norm:.4f} | Q-mean: {recent_q:.4f}")
             print(f"  Buffer: {buffer_size}/{agent.memory.maxlen} | Collisions: {avg_collision:.3f}")
             
-            if verbose:
-                action_distribution = np.bincount(episode_actions, minlength=env.action_dim)
-                most_common_actions = np.argsort(action_distribution)[-3:][::-1]
-                print(f"  [DEBUG] Most common actions: {most_common_actions}, counts: {action_distribution[most_common_actions]}")
-                print(f"  [DEBUG] Reward distribution: min={min(episode_rewards_list):.3f}, "
-                      f"max={max(episode_rewards_list):.3f}, mean={np.mean(episode_rewards_list):.3f}")
-            print()
+            # if verbose:
+            #     action_distribution = np.bincount(episode_actions, minlength=env.action_dim)
+            #     most_common_actions = np.argsort(action_distribution)[-3:][::-1]
+            #     print(f"  [DEBUG] Most common actions: {most_common_actions}, counts: {action_distribution[most_common_actions]}")
+            #     print(f"  [DEBUG] Reward distribution: min={min(episode_rewards_list):.3f}, "
+            #           f"max={max(episode_rewards_list):.3f}, mean={np.mean(episode_rewards_list):.3f}")
+            # print()
             
         # Save progress
         if episode % 10 == 0:
