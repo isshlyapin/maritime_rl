@@ -186,7 +186,7 @@ def load_environment_template(env, template_name):
 
 
 if __name__ == "__main__":
-    env = MaritimeEnvironment(num_ships=10, k_nearest=5)
+    env = MaritimeEnvironment(num_ships=2, k_nearest=5)
     env_name = "env1"
     load_environment_template(env, env_name)
 
@@ -196,18 +196,20 @@ if __name__ == "__main__":
         action_dim=env.action_dim
     )
 
-    model = "ship_collision_avoidance_model270.pth"
+    model = "v1_ship_collision_avoidance_model140.pth"
 
     agent.target_net.load_state_dict(torch.load("models/" + model))
     agent.target_net.eval()
+    agent.policy_net.load_state_dict(torch.load("models/" + model))
+    agent.policy_net.eval()
 
-    # 🎬 создаем визуализатор
+    # создаем визуализатор
     visualizer = MaritimeVisualizer(env, ship_idx=0)
 
     # определим callback-функцию для управления кораблем
     def step_callback(frame):
         state = env._get_state(0)
-        action = agent.select_action(state, epsilon=0.05)
+        action = agent.select_action(state, epsilon=0)
         env.step(0, action)  # обновляем состояние среды
 
     # Запускаем анимацию
