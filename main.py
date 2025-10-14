@@ -457,7 +457,7 @@ def train_model():
             
         # Save progress
         if episode % 10 == 0:
-            name = "models/ship_collision_avoidance_model" + str(episode)
+            name = "models/ship_collision_avoidance_model" + str(episode) + ".pth"
             torch.save(agent.target_net.state_dict(), name)
 
     
