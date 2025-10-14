@@ -82,10 +82,10 @@ class MultiShipCollisionAvoidance:
         """Store experience in replay buffer"""
         self.memory.append((state, action, reward, next_state, done))
     
-    def update_model(self):
+    def update_model(self, verbose=False):
         """Update the model using Double DQN"""
         if len(self.memory) < self.batch_size:
-            return 0
+            return None
         
         # Sample batch from replay buffer
         batch = random.sample(self.memory, self.batch_size)
@@ -114,14 +114,38 @@ class MultiShipCollisionAvoidance:
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
+        
+        # Calculate gradient norm for debugging
+        total_norm = 0
+        for p in self.policy_net.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        
         self.optimizer.step()
         
         # Update target network
         self.steps_done += 1
         if self.steps_done % self.target_update == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
+            if verbose:
+                print(f"  [DEBUG] Target network updated at step {self.steps_done}")
         
-        return loss.item()
+        # Return debug info
+        debug_info = {
+            'loss': loss.item(),
+            'grad_norm': total_norm,
+            'q_mean': current_q_values.mean().item(),
+            'q_std': current_q_values.std().item(),
+            'q_max': current_q_values.max().item(),
+            'q_min': current_q_values.min().item(),
+            'target_q_mean': target_q_values.mean().item(),
+            'reward_mean': rewards.mean().item(),
+            'reward_std': rewards.std().item(),
+        }
+        
+        return debug_info
 
 
 class MaritimeEnvironment:
@@ -153,7 +177,7 @@ class MaritimeEnvironment:
         
         self.reset()
     
-    def reset(self):
+    def reset(self, verbose=False):
         """Reset environment to initial state"""
         self.time_step = 0
         
@@ -171,7 +195,14 @@ class MaritimeEnvironment:
             }
             self.ships.append(ship)
         
-        return self._get_state(0)  # Return state for ship 0
+        if verbose:
+            ship = self.ships[0]
+            dist_to_target = math.sqrt((ship['target_x'] - ship['x'])**2 + (ship['target_y'] - ship['y'])**2)
+            print(f"  [RESET] Initial distance to target: {dist_to_target:.1f}m")
+            print(f"  [RESET] Initial position: ({ship['x']:.1f}, {ship['y']:.1f})")
+            print(f"  [RESET] Target position: ({ship['target_x']:.1f}, {ship['target_y']:.1f})")
+        
+        return self._get_state(0, verbose=verbose)  # Return state for ship 0
     
     def _get_k_nearest_ships(self, ship_idx):
         """Get K nearest ships to the given ship"""
@@ -191,7 +222,7 @@ class MaritimeEnvironment:
         distances.sort(key=lambda x: x[1])
         return [idx for idx, dist in distances[:self.k_nearest]]
     
-    def _get_state(self, ship_idx):
+    def _get_state(self, ship_idx, verbose=False):
         """Get state representation for a ship"""
         ship = self.ships[ship_idx]
         state = [
@@ -224,7 +255,14 @@ class MaritimeEnvironment:
         while len(state) < self.state_dim:
             state.extend([0, 0, 0])
         
-        return np.array(state, dtype=np.float32)
+        state_array = np.array(state, dtype=np.float32)
+        
+        if verbose:
+            print(f"  [STATE] Raw state (first 7 dims): {state_array[:7]}")
+            print(f"  [STATE] State range: [{state_array.min():.3f}, {state_array.max():.3f}]")
+            print(f"  [STATE] State mean: {state_array.mean():.3f}, std: {state_array.std():.3f}")
+        
+        return state_array
 
     def _apply_ship_motion(self, ship, delta_speed, delta_heading, dt=1.0):
         """Применить изменения скорости и курса и обновить позицию"""
@@ -263,7 +301,7 @@ class MaritimeEnvironment:
         
         return max_risk
     
-    def _calculate_reward(self, ship_idx, action):
+    def _calculate_reward(self, ship_idx, action, verbose=False):
         """Calculate reward for a ship's action"""
         ship = self.ships[ship_idx]
         
@@ -285,6 +323,12 @@ class MaritimeEnvironment:
         # Combined reward with weights from paper
         alpha, beta, gamma = 0.4, 0.4, 0.2
         total_reward = alpha * r_ca + beta * r_ne + gamma * r_ce
+        
+        if verbose:
+            dist_to_target = math.sqrt(dx**2 + dy**2)
+            print(f"  [REWARD] r_ca={r_ca:.3f}, r_ne={r_ne:.3f}, r_ce={r_ce:.3f}, total={total_reward:.3f}")
+            print(f"  [STATE] speed={ship['speed']:.2f}, heading={ship['heading']:.1f}°, dist_to_target={dist_to_target:.1f}m")
+            print(f"  [DEVIATIONS] speed_dev={speed_dev:.3f}, heading_dev={heading_dev:.3f}")
         
         return total_reward
     
@@ -314,7 +358,7 @@ class MaritimeEnvironment:
         
         return 0.0  # Default good compliance if no other ships
     
-    def step(self, ship_idx, action):
+    def step(self, ship_idx, action, verbose=False):
         """Execute action for a ship and return next state, reward, done"""
         dt = 1.0  # time step in seconds
 
@@ -332,18 +376,21 @@ class MaritimeEnvironment:
             self._apply_ship_motion(ship, delta_speed, delta_heading, dt)
         
         # Calculate reward
-        reward = self._calculate_reward(ship_idx, action)
+        reward = self._calculate_reward(ship_idx, action, verbose=verbose)
         
         # Check if episode is done
         self.time_step += 1
         done = self.time_step >= self.max_steps
+        termination_reason = None
         
         # Check for collisions
         if self._calculate_collision_risk(ship_idx) < (-1 + 1e-6):
             reward = -5
             done = True
+            termination_reason = "collision"
         
         # Check achieving a goal
+        ship = self.ships[ship_idx]
         target_d = math.sqrt(
             (ship['x'] - ship['target_x'])**2 +
             (ship['y'] - ship['target_y'])**2
@@ -351,10 +398,17 @@ class MaritimeEnvironment:
         if target_d < 50:
             reward = 5
             done = True
-
-        next_state = self._get_state(ship_idx)
+            termination_reason = "goal_reached"
         
-        return next_state, reward, done
+        if done and termination_reason is None:
+            termination_reason = "max_steps"
+
+        next_state = self._get_state(ship_idx, verbose=verbose)
+        
+        if verbose:
+            print(f"  [STEP] Action: speed_delta={delta_speed}, heading_delta={delta_heading}, reward={reward:.3f}, done={done}, reason={termination_reason}")
+        
+        return next_state, reward, done, termination_reason
     
     def _normalize_angle_180(self, angle_deg):
         """Приводит угол к диапазону [-180, 180]"""
@@ -387,6 +441,11 @@ class MaritimeEnvironment:
 
 def train_model():
     """Main training function"""
+    import os
+    
+    # Create models directory if it doesn't exist
+    os.makedirs("models", exist_ok=True)
+    
     # Environment parameters
     num_ships = 7
     k_nearest = 5
@@ -403,6 +462,13 @@ def train_model():
         target_update=1000
     )
     
+    print(f"Environment setup:")
+    print(f"  State dimension: {env.state_dim}")
+    print(f"  Action dimension: {env.action_dim}")
+    print(f"  Number of ships: {num_ships}")
+    print(f"  K nearest ships: {k_nearest}")
+    print()
+    
     # Training parameters
     num_episodes = 10_000
     epsilon_start = 1.0
@@ -418,24 +484,45 @@ def train_model():
     
     epsilon = epsilon_start
     episode_collisions = 0
+    
+    # Debug tracking
+    losses = []
+    q_values_log = []
+    grad_norms = []
+    
     for episode in range(num_episodes):
+        # Verbose logging for early episodes
+        verbose = (episode < 5 or episode % 100 == 0)
+        
         # Reset environment
-        state = env.reset()
+        state = env.reset(verbose=verbose)
         total_reward = 0
         
         step_count = 0
         done = False
+        episode_actions = []
+        episode_rewards_list = []
+        termination_reason = None
 
         while not done and step_count < env.max_steps:
             # Select and execute action
             action = agent.select_action(state, epsilon)
-            next_state, reward, done = env.step(0, action)  # Train for ship 0
+            episode_actions.append(action)
+            
+            step_verbose = verbose and step_count < 10  # Only first 10 steps
+            next_state, reward, done, termination_reason = env.step(0, action, verbose=step_verbose)
+            episode_rewards_list.append(reward)
             
             # Store transition
             agent.store_transition(state, action, reward, next_state, done)
             
             # Update model
-            loss = agent.update_model()
+            debug_info = agent.update_model(verbose=step_verbose)
+            
+            if debug_info is not None:
+                losses.append(debug_info['loss'])
+                grad_norms.append(debug_info['grad_norm'])
+                q_values_log.append(debug_info['q_mean'])
             
             # Update statistics
             total_reward += reward
@@ -450,15 +537,32 @@ def train_model():
         
         # Record statistics
         episode_rewards.append(total_reward)
-        collision_rate = episode_collisions / episode if episode > 0 else 0
+        collision_rate = episode_collisions / (episode + 1)
         collision_rates.append(collision_rate)
         
         # Print progress
         if episode % 1 == 0:
             avg_reward = np.mean(episode_rewards[-100:])
             avg_collision = np.mean(collision_rates[-100:])
-            print(f"Episode {episode}, Avg Reward: {avg_reward:.2f}, "
-                  f"Collision Rate: {avg_collision:.3f}, Epsilon: {epsilon:.3f}")
+            
+            # Additional debug info
+            buffer_size = len(agent.memory)
+            recent_loss = np.mean(losses[-100:]) if losses else 0
+            recent_grad_norm = np.mean(grad_norms[-100:]) if grad_norms else 0
+            recent_q = np.mean(q_values_log[-100:]) if q_values_log else 0
+            
+            print(f"Episode {episode}/{num_episodes} | Steps: {step_count} | Reason: {termination_reason}")
+            print(f"  Reward: {total_reward:.2f} (avg: {avg_reward:.2f}) | Epsilon: {epsilon:.3f}")
+            print(f"  Loss: {recent_loss:.4f} | Grad: {recent_grad_norm:.4f} | Q-mean: {recent_q:.4f}")
+            print(f"  Buffer: {buffer_size}/{agent.memory.maxlen} | Collisions: {avg_collision:.3f}")
+            
+            if verbose:
+                action_distribution = np.bincount(episode_actions, minlength=env.action_dim)
+                most_common_actions = np.argsort(action_distribution)[-3:][::-1]
+                print(f"  [DEBUG] Most common actions: {most_common_actions}, counts: {action_distribution[most_common_actions]}")
+                print(f"  [DEBUG] Reward distribution: min={min(episode_rewards_list):.3f}, "
+                      f"max={max(episode_rewards_list):.3f}, mean={np.mean(episode_rewards_list):.3f}")
+            print()
             
         # Save progress
         if episode % 10 == 0:
@@ -476,32 +580,41 @@ def test_model(agent, env, num_episodes=100):
     
     total_rewards = []
     collision_counts = []
+    goal_reached_counts = []
     
     for episode in range(num_episodes):
         state = env.reset()
         total_reward = 0
         collisions = 0
         done = False
+        goal_reached = False
         
         while not done:
             action = agent.select_action(state, epsilon=0.05)  # Small epsilon for testing
-            next_state, reward, done = env.step(0, action)
+            next_state, reward, done, termination_reason = env.step(0, action)
             
             total_reward += reward
             if reward <= -5:  # Collision
                 collisions += 1
+            if termination_reason == "goal_reached":
+                goal_reached = True
             
             state = next_state
         
         total_rewards.append(total_reward)
         collision_counts.append(collisions)
+        goal_reached_counts.append(1 if goal_reached else 0)
     
     avg_reward = np.mean(total_rewards)
     avg_collisions = np.mean(collision_counts)
+    goal_reached_rate = np.mean(goal_reached_counts)
     success_rate = (num_episodes - np.sum(collision_counts)) / num_episodes
     
-    print(f"Test Results - Avg Reward: {avg_reward:.2f}, "
-          f"Avg Collisions: {avg_collisions:.2f}, Success Rate: {success_rate:.3f}")
+    print(f"Test Results:")
+    print(f"  Avg Reward: {avg_reward:.2f}")
+    print(f"  Avg Collisions: {avg_collisions:.2f}")
+    print(f"  Goal Reached Rate: {goal_reached_rate:.3f}")
+    print(f"  Success Rate (no collision): {success_rate:.3f}")
     
     return total_rewards, collision_counts
 
