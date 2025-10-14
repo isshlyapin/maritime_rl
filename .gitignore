@@ -1,4 +1,5 @@
 .venv/
-.models/
-.videos/
-.environments/
+__pycache__/
+#models/
+#videos/
+#environments/
