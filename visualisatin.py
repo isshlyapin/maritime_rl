@@ -6,6 +6,8 @@ from main import MultiShipCollisionAvoidance
 import torch
 import json
 import os
+import matplotlib.patches as patches
+from matplotlib.patches import Circle
 
 class MaritimeVisualizer:
     def __init__(self, env, ship_idx=0):
@@ -23,6 +25,18 @@ class MaritimeVisualizer:
         # Камера
         self.xlim = None
         self.ylim = None
+
+        self._init_safety_zones()
+
+
+    # Инициализация зон безопасности
+    def _init_safety_zones(self):
+        self.safety_zones = []
+        for ship in self.env.ships:
+            r = ship.get('safety_radius', 50)
+            circle = Circle((ship['x'], ship['y']), r, color='blue', alpha=0.1)
+            self.ax.add_patch(circle)
+            self.safety_zones.append(circle)
 
     def init_plot(self):
         """Инициализация графика"""
@@ -83,30 +97,52 @@ class MaritimeVisualizer:
         self.ax.set_xlim(*self.xlim)
         self.ax.set_ylim(*self.ylim)
 
-    def update(self, frame):
-        """Обновление кадра"""
-        main_ship = self.env.ships[self.ship_idx]
-        self.update_camera(main_ship)
+    def _update_safety_zones(self):
+        for ship, circle in zip(self.env.ships, self.safety_zones):
+            circle.center = (ship['x'], ship['y'])
+            circle.set_facecolor((0, 0, 1, 0.1))  # базовый цвет
 
+        # Проверка пересечений
+        n = len(self.env.ships)
+        for i in range(n):
+            for j in range(i + 1, n):
+                dx = self.env.ships[i]['x'] - self.env.ships[j]['x']
+                dy = self.env.ships[i]['y'] - self.env.ships[j]['y']
+                dist = (dx**2 + dy**2)**0.5
+                r1 = self.env.ships[i].get('safety_radius', 50)
+                r2 = self.env.ships[j].get('safety_radius', 50)
+                if dist < r1 + r2:
+                    self.safety_zones[i].set_facecolor((1, 0, 0, 0.2))
+                    self.safety_zones[j].set_facecolor((1, 0, 0, 0.2))
+
+    def _draw_ships(self):
         xs = [ship['x'] for ship in self.env.ships]
         ys = [ship['y'] for ship in self.env.ships]
-
-        #txs = [ship['target_x'] for ship in self.env.ships]
-        #tys = [ship['target_y'] for ship in self.env.ships]
-
-        txs = [env.ships[0]['target_x']]
-        tys = [env.ships[0]['target_y']]
-
         self.ship_points.set_data(xs, ys)
-        self.target_points.set_data(txs, tys)
 
+        main_ship = self.env.ships[self.ship_idx]
         self.main_ship_point.set_data([main_ship['x']], [main_ship['y']])
 
-        # Обновляем стрелки направления
+        txs = [self.env.ships[self.ship_idx]['target_x']]
+        tys = [self.env.ships[self.ship_idx]['target_y']]
+        self.target_points.set_data(txs, tys)
+
+    def update(self, frame):
+        main_ship = self.env.ships[self.ship_idx]
+
+        self._draw_ships()
+        self._update_safety_zones()
         self._draw_arrows()
+        self.update_camera(main_ship)
 
-
-        return self.ship_points, self.target_points, self.main_ship_point, *self.heading_arrows
+        # Возвращаем объекты для FuncAnimation
+        return (
+            self.ship_points, 
+            self.main_ship_point, 
+            self.target_points, 
+            *self.heading_arrows, 
+            *self.safety_zones
+        )
 
     def run(self, step_callback=None, interval=100, steps=1000, save_path=None, fps=30):
         """
@@ -141,8 +177,8 @@ class MaritimeVisualizer:
             except Exception as e:
                 print(f"Ошибка при сохранении видео: {e}")
 
-        # Показываем анимацию
-        plt.show()
+        # Пока не показываем анимацию
+        # plt.show()
 
 
 
@@ -183,8 +219,6 @@ def load_environment_template(env, template_name):
     env.time_step = 0
 
 
-
-
 if __name__ == "__main__":
     env = MaritimeEnvironment(num_ships=2, k_nearest=5)
     env_name = "env1"
@@ -196,12 +230,16 @@ if __name__ == "__main__":
         action_dim=env.action_dim
     )
 
-    model = "v1_ship_collision_avoidance_model140.pth"
+    model = "ship_collision_avoidance_model320.pth"
 
-    agent.target_net.load_state_dict(torch.load("models/" + model))
-    agent.target_net.eval()
-    agent.policy_net.load_state_dict(torch.load("models/" + model))
-    agent.policy_net.eval()
+
+    try: 
+        agent.target_net.load_state_dict(torch.load("models/" + model))
+        agent.target_net.eval()
+        agent.policy_net.load_state_dict(torch.load("models/" + model))
+        agent.policy_net.eval()
+    except:
+        raise FileNotFoundError(f"Модель не найдена: {model}")
 
     # создаем визуализатор
     visualizer = MaritimeVisualizer(env, ship_idx=0)
@@ -213,5 +251,5 @@ if __name__ == "__main__":
         env.step(0, action)  # обновляем состояние среды
 
     # Запускаем анимацию
-    visualizer.run(step_callback=step_callback, interval=100, steps=500, save_path="videos/" + model[:-4] + ".mp4")
+    visualizer.run(step_callback=step_callback, interval=100, steps=500, save_path="videos/" + model[:-4] + ".mp4", fps=10)
 
