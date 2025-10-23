@@ -1,8 +1,6 @@
 import math
 import random
 
-import numpy as np
-
 from typing import List
 
 MAX_SPEED_RANDOM_SHIP = 10
@@ -30,6 +28,11 @@ class Ship:
         dy = other_ship.y - self.y
         return math.sqrt(dx**2 + dy**2)
 
+    def distance_to_target(self):
+        dx = self.target_x - self.x
+        dy = self.target_y - self.y
+        return math.sqrt(dx**2 + dy**2)
+
     def relative_speed(self, other_ship):
         dvx = other_ship.speed * math.cos(math.radians(other_ship.heading)) - self.speed * math.cos(math.radians(self.heading))
         dvy = other_ship.speed * math.sin(math.radians(other_ship.heading)) - self.speed * math.sin(math.radians(self.heading))
@@ -48,20 +51,40 @@ class Ship:
         self.x += self.speed * math.cos(math.radians(self.heading)) * dt
         self.y += self.speed * math.sin(math.radians(self.heading)) * dt
 
+    def get_state(self):
+        return {
+            "x": self.x,
+            "y": self.y,
+            "target_x": self.target_x,
+            "target_y": self.target_y,
+            "speed":   self.speed,
+            "heading": self.heading,
+            "max_speed":       self.max_speed,
+            "effective_speed": self.effective_speed
+        }
+
 
 class MaritimeEnvironment:
-    def __init__(self, map_size, max_steps, num_ships: int, ships: List['Ship'] | None = None):
+    def __init__(self, map_size, num_ships: int, ships: List['Ship'] | None = None):
         # Параметры карты
         self.size = map_size
         
         # Параметры симуляции
         self.time_step = 0
-        self.max_steps = max_steps
 
-        self.num_ships = num_ships
         self.ships = ships
+        self.num_ships = num_ships
 
         self.reset(self.ships)
+
+        if not self.is_valid():
+            raise ValueError("Invalid environment configuration")
+
+    def is_valid(self):
+        if self.ships is None or len(self.ships) != self.num_ships:
+            return False
+        
+        return True
 
     def reset(self, ships: List['Ship'] | None = None):
         """Reset environment to initial state"""
@@ -86,31 +109,53 @@ class MaritimeEnvironment:
 
     def get_nearest_ships(self, ship_idx, count):
         """Get K nearest ships to the given ship"""
+        if not (0 <= ship_idx < self.num_ships):
+            raise ValueError("Invalid ship index")
+        
+        if self.ships is None:
+            raise ValueError("No ships in the environment")
+
         ship = self.ships[ship_idx]
         distances = []
-        
+
         for i, other_ship in enumerate(self.ships):
             if i == ship_idx:
                 continue
+            distances.append((ship.distance_to(other_ship), i))
 
-            distances.append((i, ship.distance_to(other_ship)))
+        distances.sort(key=lambda item: item[0])
+        return [idx for _, idx in distances[:count]]
 
-        # Sort by distance and take count nearest
-        distances.sort(key=lambda x: x[1])
-        return [idx for idx, dist in distances[:count]]
-    
     def apply_ship_motion(self, ship_idx, delta_speed, delta_heading):
         """Применить изменения скорости и курса к кораблю"""
+        if not (0 <= ship_idx < self.num_ships):
+            raise ValueError("Invalid ship index")
+
+        if self.ships is None:
+            raise ValueError("No ships in the environment")
+
         ship = self.ships[ship_idx]
         ship.change_speed(delta_speed)
         ship.change_heading(delta_heading)
 
     def step(self, dt):
         """Execute action for a ship and return next state, reward, done"""
+        if self.ships is None:
+            raise ValueError("No ships in the environment")
+
         for ship in self.ships:
             ship.go_straight(dt)
+        
+        self.time_step += dt
 
-    def get_ship(self, ship_idx: int) -> Ship | None:
-        if 0 <= ship_idx < len(self.ships):
-            return self.ships[ship_idx]
-        return None
+    def get_ship(self, ship_idx: int) -> Ship:
+        if not (0 <= ship_idx < self.num_ships):
+            raise ValueError("Invalid ship index")
+
+        if self.ships is None:
+            raise ValueError("No ships in the environment")
+
+        return self.ships[ship_idx]
+    
+    def get_nsteps(self):
+        return self.time_step

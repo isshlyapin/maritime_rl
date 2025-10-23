@@ -1,0 +1,16 @@
+#Control constants
+SHIP_SPEED_CHANGES = [-3, -2, -1, 0, 1, 2, 3]
+SHIP_HEADING_CHANGES = [-30, -20, -10, 0, 10, 20, 30]
+
+#Collision constants
+SHIP_MIN_SAFE_DISTANCE = 5.0
+SHIP_MAX_SAFE_DISTANCE = 10.0
+
+#General constants
+MAX_STEPS = 1000
+TARGET_RADIUS = 5.0
+
+#Environment constants
+MAP_SIZE = 500.0
+NUMBER_OF_SHIPS = 10
+NUMBER_OF_NEAREST_SHIPS = 5
