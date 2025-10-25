@@ -68,7 +68,7 @@ class MaritimeVisualizer:
 
         for ship in self.env.ships:
             x, y = ship.get_state()['x'], ship.get_state()['y']
-            angle = math.radians(ship['heading'])
+            angle = math.radians(ship.get_state()['heading'])
             dx = math.cos(angle) * 20
             dy = math.sin(angle) * 20
             arrow = self.ax.arrow(x, y, dx, dy, head_width=10, head_length=15, fc='blue', ec='blue')
@@ -110,8 +110,8 @@ class MaritimeVisualizer:
         n = self.env.num_ships
         for i in range(n):
             for j in range(i + 1, n):
-                dx = self.env.get_ship(i).get_state()['x'] - self.env.get_ship(j).get_state(j)['x']
-                dx = self.env.get_ship(i).get_state()['y'] - self.env.get_ship(j).get_state(j)['y']
+                dx = self.env.get_ship(i).get_state()['x'] - self.env.get_ship(j).get_state()['x']
+                dy = self.env.get_ship(i).get_state()['y'] - self.env.get_ship(j).get_state()['y']
                 dist = (dx**2 + dy**2)**0.5
                 r1 = self.safety_radius
                 r2 = self.safety_radius
@@ -288,8 +288,8 @@ class GeneratorVideo:
 
     def _step_callback(self, frame):
         """Функция шага симуляции."""
-        state = torch.FloatTensor(self.rl_env._get_state(self.ship_idx))
-        action = self.agent(state)
+        state = torch.FloatTensor(self.rl_env._get_state(self.ship_idx)).unsqueeze(0)
+        action = self.agent(state).argmax().item()
         self.rl_env.step(action)
 
     def run_simulation(self, steps: int = 500, interval: int = 100, fps: int = 10, output_name: str = None):
