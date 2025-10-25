@@ -54,8 +54,12 @@ class RLWrapperMaritimeEnv:
                     ship.relative_speed(other_ship) / ship.max_speed, # normalized
                     ship.relative_heading(other_ship) / 180.0         # normalized
                 ])
+            # pad with zero-states if there are fewer than k_nearest ships
+            missing = self.k_nearest - len(nearest_ships)
+            for _ in range(missing):
+                state.extend([0.0, 0.0, 0.0])
             return np.array(state, dtype=np.float32)
-        except Exception as e:
+        except Exception:
             raise
 
     def is_done(self) -> tuple[bool, str]:
