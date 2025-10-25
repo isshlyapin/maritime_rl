@@ -1,19 +1,23 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import math
-from main import MaritimeEnvironment
-from main import MultiShipCollisionAvoidance
+from maritime_env import Ship
+from maritime_env import MaritimeEnvironment
+from ddqn_model import DQN
+import rl_wrapper_maritime_env
 import torch
 import json
 import os
 import matplotlib.patches as patches
 from matplotlib.patches import Circle
+import rl_config
 
 class MaritimeVisualizer:
     def __init__(self, env, ship_idx=0):
         self.env = env
         self.ship_idx = ship_idx
         self.ship_size = 5
+        self.safety_radius = 50
 
         # Создаем фигуру
         self.fig, self.ax = plt.subplots()
@@ -33,8 +37,8 @@ class MaritimeVisualizer:
     def _init_safety_zones(self):
         self.safety_zones = []
         for ship in self.env.ships:
-            r = ship.get('safety_radius', 50)
-            circle = Circle((ship['x'], ship['y']), r, color='blue', alpha=0.1)
+            r = self.safety_radius
+            circle = Circle((ship.get_state()['x'], ship.get_state()['y']), r, color='blue', alpha=0.1)
             self.ax.add_patch(circle)
             self.safety_zones.append(circle)
 
@@ -46,10 +50,10 @@ class MaritimeVisualizer:
         self.heading_arrows = []
 
         # Устанавливаем начальные границы камеры по главному кораблю
-        main_ship = self.env.ships[self.ship_idx]
+        main_ship = self.env.get_ship(self.ship_idx)
         camera_range = self.env.size
-        self.xlim = (main_ship['x'] - camera_range, main_ship['x'] + camera_range)
-        self.ylim = (main_ship['y'] - camera_range, main_ship['y'] + camera_range)
+        self.xlim = (main_ship.get_state()['x'] - camera_range, main_ship.get_state()['x'] + camera_range)
+        self.ylim = (main_ship.get_state()['y'] - camera_range, main_ship.get_state()['y'] + camera_range)
         self.ax.set_xlim(*self.xlim)
         self.ax.set_ylim(*self.ylim)
 
@@ -63,7 +67,7 @@ class MaritimeVisualizer:
         self.heading_arrows.clear()
 
         for ship in self.env.ships:
-            x, y = ship['x'], ship['y']
+            x, y = ship.get_state()['x'], ship.get_state()['y']
             angle = math.radians(ship['heading'])
             dx = math.cos(angle) * 20
             dy = math.sin(angle) * 20
@@ -80,16 +84,16 @@ class MaritimeVisualizer:
         dx = dy = 0
 
         # Проверяем X
-        if main_ship['x'] < x_min + deadzone:
-            dx = (main_ship['x'] - (x_min + deadzone)) * smooth_factor
-        elif main_ship['x'] > x_max - deadzone:
-            dx = (main_ship['x'] - (x_max - deadzone)) * smooth_factor
+        if main_ship.get_state()['x'] < x_min + deadzone:
+            dx = (main_ship.get_state()['x'] - (x_min + deadzone)) * smooth_factor
+        elif main_ship.get_state()['x'] > x_max - deadzone:
+            dx = (main_ship.get_state()['x'] - (x_max - deadzone)) * smooth_factor
 
         # Проверяем Y
-        if main_ship['y'] < y_min + deadzone:
-            dy = (main_ship['y'] - (y_min + deadzone)) * smooth_factor
-        elif main_ship['y'] > y_max - deadzone:
-            dy = (main_ship['y'] - (y_max - deadzone)) * smooth_factor
+        if main_ship.get_state()['y'] < y_min + deadzone:
+            dy = (main_ship.get_state()['y'] - (y_min + deadzone)) * smooth_factor
+        elif main_ship.get_state()['y'] > y_max - deadzone:
+            dy = (main_ship.get_state()['y'] - (y_max - deadzone)) * smooth_factor
 
         # Обновляем границы
         self.xlim = (x_min + dx, x_max + dx)
@@ -99,36 +103,36 @@ class MaritimeVisualizer:
 
     def _update_safety_zones(self):
         for ship, circle in zip(self.env.ships, self.safety_zones):
-            circle.center = (ship['x'], ship['y'])
+            circle.center = (ship.get_state()['x'], ship.get_state()['y'])
             circle.set_facecolor((0, 0, 1, 0.1))  # базовый цвет
 
         # Проверка пересечений
-        n = len(self.env.ships)
+        n = self.env.num_ships
         for i in range(n):
             for j in range(i + 1, n):
-                dx = self.env.ships[i]['x'] - self.env.ships[j]['x']
-                dy = self.env.ships[i]['y'] - self.env.ships[j]['y']
+                dx = self.env.get_ship(i).get_state()['x'] - self.env.get_ship(j).get_state(j)['x']
+                dx = self.env.get_ship(i).get_state()['y'] - self.env.get_ship(j).get_state(j)['y']
                 dist = (dx**2 + dy**2)**0.5
-                r1 = self.env.ships[i].get('safety_radius', 50)
-                r2 = self.env.ships[j].get('safety_radius', 50)
+                r1 = self.safety_radius
+                r2 = self.safety_radius
                 if dist < r1 + r2:
                     self.safety_zones[i].set_facecolor((1, 0, 0, 0.2))
                     self.safety_zones[j].set_facecolor((1, 0, 0, 0.2))
 
     def _draw_ships(self):
-        xs = [ship['x'] for ship in self.env.ships]
-        ys = [ship['y'] for ship in self.env.ships]
+        xs = [ship.get_state()['x'] for ship in self.env.ships]
+        ys = [ship.get_state()['y'] for ship in self.env.ships]
         self.ship_points.set_data(xs, ys)
 
-        main_ship = self.env.ships[self.ship_idx]
-        self.main_ship_point.set_data([main_ship['x']], [main_ship['y']])
+        main_ship = self.env.get_ship(self.ship_idx)
+        self.main_ship_point.set_data([main_ship.get_state()['x']], [main_ship.get_state()['y']])
 
-        txs = [self.env.ships[self.ship_idx]['target_x']]
-        tys = [self.env.ships[self.ship_idx]['target_y']]
+        txs = [self.env.get_ship(self.ship_idx).get_state()['target_x']]
+        tys = [self.env.get_ship(self.ship_idx).get_state()['target_y']]
         self.target_points.set_data(txs, tys)
 
     def update(self, frame):
-        main_ship = self.env.ships[self.ship_idx]
+        main_ship = self.env.get_ship(self.ship_idx)
 
         self._draw_ships()
         self._update_safety_zones()
@@ -181,75 +185,156 @@ class MaritimeVisualizer:
         # plt.show()
 
 
+class GeneratorVideo:
+    """
+    Класс для гибкой генерации видео морских симуляций.
+    Позволяет повторно использовать один объект для разных сред и моделей.
+    """
 
-def load_environment_template(env, template_name):
-    """
-    Загружает состояние среды из файла шаблона.
-    
-    :param env: объект MaritimeEnvironment
-    :param template_name: имя шаблона без расширения (например, 'template1')
-    """
-    template_path = os.path.join("environments", template_name + ".json")
-    
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Шаблон не найден: {template_path}")
-    
-    with open(template_path, "r") as f:
-        data = json.load(f)
-    
-    ships_data = data.get("ships", [])
-    
-    # Сбрасываем текущую среду
-    env.ships = []
-    
-    for ship_info in ships_data:
-        ship = {
-            'x': ship_info.get('x', 0),
-            'y': ship_info.get('y', 0),
-            'target_x': ship_info.get('target_x', 0),
-            'target_y': ship_info.get('target_y', 0),
-            'speed': ship_info.get('speed', 0),
-            'heading': ship_info.get('heading', 0),
-            'desired_speed': ship_info.get('desired_speed', 7)
-        }
-        env.ships.append(ship)
-        print(ship)
-    
-    # Сбрасываем счётчик времени
-    env.time_step = 0
+    def __init__(self, 
+                 save_dir: str = "videos"):
+        self.save_dir  = save_dir
+
+        # Инициализация среды и модели пустыми
+        self.ship_idx = 0
+        self.rl_env = None
+        self.env = None
+        self.agent = None
+        self.visualizer = None
+        self.model_name = None
+
+        # Гарантируем, что папка для видео существует
+        os.makedirs(self.save_dir, exist_ok=True)
+
+    def load_environment(self, env_name: str):
+        """
+        Загружает состояние среды из JSON-шаблона.
+
+        :param env_name: имя шаблона 
+        """
+        print(f"[INFO] Загружаем окружение: {env_name}")
+
+        # Создаем новую среду
+
+        # Путь к шаблону
+        template_path = os.path.join("environments", env_name)
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(f"Шаблон не найден: {template_path}")
+        if not env_name.endswith(".json"):
+            raise FileNotFoundError("File is not json")
+
+        # Читаем данные шаблона
+        with open(template_path, "r") as f:
+            data = json.load(f)
+
+        ships_data = data.get("ships", [])
+
+        ships = []
+
+        # Очищаем текущие корабли
+        num_ships = len(ships_data)
+
+        # Загружаем корабли из шаблона
+        for ship_info in ships_data:
+            ship = Ship(
+                ship_info.get('x', 0),
+                ship_info.get('y', 0),
+                ship_info.get('target_x', 0),
+                ship_info.get('target_y', 0),
+                ship_info.get('speed', 0),
+                ship_info.get('heading', 0),
+                ship_info.get('effective_speed', 5),
+                ship_info.get('max_speed', 7)
+            )
+            ships.append(ship)
+
+        self.rl_env = rl_wrapper_maritime_env.RLWrapperMaritimeEnv(rl_config.MAP_SIZE, rl_config.MAX_STEPS, rl_config.NUMBER_OF_NEAREST_SHIPS, num_ships, ships, self.ship_idx)
+
+        self.env = self.rl_env.env
+
+        print(f"[OK] Среда успешно загружена: {self.env.num_ships} кораблей")
+
+    def load_model(self, model_name: str):
+        """Загружает обученную модель агента."""
+        print(f"[INFO] Загружаем модель: {model_name}")
+        model_path = os.path.join("models", model_name)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Модель не найдена: {model_path}")
+
+        self.model_name = model_name
+
+         # Calculate state and action dimensions
+        # State: [dx, dy, speed, heading] + k_nearest * [distance, rel_speed, rel_heading]
+        state_dim = 4 + rl_config.NUMBER_OF_NEAREST_SHIPS * 3
+        # Action: speed_changes (7) * heading_changes (7)
+        action_dim = len(rl_config.SHIP_SPEED_CHANGES) * len(rl_config.SHIP_HEADING_CHANGES)
+
+        # Создаем нового агента под текущую среду
+        self.agent = DQN(
+            state_dim=state_dim,
+            action_dim=action_dim
+        )
+
+        self.agent.load_state_dict(torch.load(model_path))
+        self.agent.eval()
+
+        print("[OK] Модель успешно загружена.")
+
+    def _prepare_visualizer(self):
+        """Создает визуализатор для текущей среды."""
+        if self.env is None:
+            raise ValueError("Окружение не загружено. Используй load_environment().")
+        self.visualizer = MaritimeVisualizer(self.env, ship_idx=self.ship_idx)
+
+    def _step_callback(self, frame):
+        """Функция шага симуляции."""
+        state = torch.FloatTensor(self.rl_env._get_state(self.ship_idx))
+        action = self.agent(state)
+        self.rl_env.step(action)
+
+    def run_simulation(self, steps: int = 500, interval: int = 100, fps: int = 10, output_name: str = None):
+        """
+        Запускает симуляцию и сохраняет видео.
+        Можно вызывать много раз с разными шаблонами и моделями.
+        """
+        if self.env is None:
+            raise ValueError("Окружение не загружено. Используй load_environment().")
+        if self.agent is None:
+            raise ValueError("Модель не загружена. Используй load_model().")
+        if self.rl_env is None:
+            raise ValueError("Обертка на среду не загрузилась ( если сюда дошло то гг :) )")
+
+        self._prepare_visualizer()
+
+        # Путь для сохранения
+        if output_name is None:
+            if self.model_name:
+                output_name = self.model_name.replace(".pth", ".mp4")
+            else:
+                output_name = "simulation.mp4"
+        save_path = os.path.join(self.save_dir, output_name)
+
+        print(f"[INFO] Запуск симуляции ({steps} шагов)...")
+
+        self.visualizer.run(
+            step_callback=self._step_callback,
+            interval=interval,
+            steps=steps,
+            save_path=save_path,
+            fps=fps
+        )
+
+        print(f"[SUCCESS] Видео сохранено: {save_path}")
+
 
 
 if __name__ == "__main__":
-    env = MaritimeEnvironment(num_ships=2, k_nearest=5)
-    env_name = "env1"
-    load_environment_template(env, env_name)
+    generator = GeneratorVideo(save_dir="videos")
 
-    # Загрузим обученную модель
-    agent = MultiShipCollisionAvoidance(
-        state_dim=env.state_dim,
-        action_dim=env.action_dim
-    )
+    # Загружаем окружение и модель
+    generator.load_environment("env1.json")
+    generator.load_model("ship_collision_avoidance_model320.pth")
 
-    model = "ship_collision_avoidance_model320.pth"
-
-
-    try: 
-        agent.target_net.load_state_dict(torch.load("models/" + model))
-        agent.target_net.eval()
-        agent.policy_net.load_state_dict(torch.load("models/" + model))
-        agent.policy_net.eval()
-    except:
-        raise FileNotFoundError(f"Модель не найдена: {model}")
-
-    # создаем визуализатор
-    visualizer = MaritimeVisualizer(env, ship_idx=0)
-
-    # определим callback-функцию для управления кораблем
-    def step_callback(frame):
-        state = env._get_state(0)
-        action = agent.select_action(state, epsilon=0)
-        env.step(0, action)  # обновляем состояние среды
-
-    # Запускаем анимацию
-    visualizer.run(step_callback=step_callback, interval=100, steps=500, save_path="videos/" + model[:-4] + ".mp4", fps=10)
+    # Генерируем видео
+    generator.run_simulation(steps=400, fps=10, output_name="env1_model320.mp4")
 
