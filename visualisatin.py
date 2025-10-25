@@ -189,11 +189,19 @@ class GeneratorVideo:
     """
     Класс для гибкой генерации видео морских симуляций.
     Позволяет повторно использовать один объект для разных сред и моделей.
+
+    :param save_dir: путь, куда сохранять итоговые видео
+    :param models_dir: путь, где хранятся модели для rl
+    :param env_dir: путь, где хранятся начальные положения окружения
     """
 
     def __init__(self, 
-                 save_dir: str = "videos"):
-        self.save_dir  = save_dir
+                 save_dir  : str = "videos",
+                 models_dir: str = "models",
+                 env_dir   : str = "environments"):
+        self.save_dir   = save_dir
+        self.models_dir = models_dir
+        self.env_dir    = env_dir
 
         # Инициализация среды и модели пустыми
         self.ship_idx = 0
@@ -217,7 +225,7 @@ class GeneratorVideo:
         # Создаем новую среду
 
         # Путь к шаблону
-        template_path = os.path.join("environments", env_name)
+        template_path = os.path.join(self.env_dir, env_name)
         if not os.path.exists(template_path):
             raise FileNotFoundError(f"Шаблон не найден: {template_path}")
         if not env_name.endswith(".json"):
@@ -257,13 +265,13 @@ class GeneratorVideo:
     def load_model(self, model_name: str):
         """Загружает обученную модель агента."""
         print(f"[INFO] Загружаем модель: {model_name}")
-        model_path = os.path.join("models", model_name)
+        model_path = os.path.join(self.models_dir, model_name)
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Модель не найдена: {model_path}")
 
         self.model_name = model_name
 
-         # Calculate state and action dimensions
+        # Calculate state and action dimensions
         # State: [dx, dy, speed, heading] + k_nearest * [distance, rel_speed, rel_heading]
         state_dim = 4 + rl_config.NUMBER_OF_NEAREST_SHIPS * 3
         # Action: speed_changes (7) * heading_changes (7)
@@ -326,15 +334,51 @@ class GeneratorVideo:
 
         print(f"[SUCCESS] Видео сохранено: {save_path}")
 
+    def set_save_dir(self, save_dir):
+        self.save_dir = save_dir
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"New path for saving: {save_dir}")
+
+    def generate_all_videos(self, steps: int = 500, interval: int = 100, fps: int = 10, save_dir: str = None):
+        if self.agent is None:
+            raise ValueError("Модель не загружена. Используй load_model().")
+
+        cur_save_dir = self.save_dir
+
+        if save_dir is None:
+            model_folder = self.model_name.removesuffix(".pth")
+            target_dir = os.path.join(self.save_dir, model_folder) if self.save_dir else os.path.join("videos", model_folder)
+        else:
+            target_dir = save_dir
+
+        self.set_save_dir(target_dir)
+        
+        for env in os.listdir(self.env_dir):           
+            if not env.endswith(".json"):
+                continue
+
+            self.load_environment(env)
+            self.run_simulation(
+                steps,
+                interval, 
+                fps, 
+                env.replace(".json", ".mp4")
+            )
+
+        self.set_save_dir(cur_save_dir)
+
+
 
 
 if __name__ == "__main__":
-    generator = GeneratorVideo(save_dir="videos")
+    generator = GeneratorVideo()
 
-    # Загружаем окружение и модель
-    generator.load_environment("env1.json")
+    # # Загружаем окружение и модель
+    # generator.load_environment("env1.json")
     generator.load_model("ship_collision_avoidance_model320.pth")
 
-    # Генерируем видео
-    generator.run_simulation(steps=400, fps=10, output_name="env1_model320.mp4")
+    # # Генерируем видео
+    # generator.run_simulation(steps=400, fps=10, output_name="env1_model320.mp4")
+
+    generator.generate_all_videos()
 

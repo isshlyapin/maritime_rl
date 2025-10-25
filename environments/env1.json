@@ -1,8 +1,35 @@
 {
     "ships": [
-      {"x": 0,    "y": 0,  "target_x": 400, "target_y": 400, "speed": 5,   "heading": 45,  "desired_speed": 7},
-      {"x": 200,  "y": 0,  "target_x": 300, "target_y": 0,   "speed": 3.5, "heading": 90,  "desired_speed": 7},
-      {"x": 400,  "y": 0,  "target_x": 0,   "target_y": 0,   "speed": 3.5, "heading": 90,  "desired_speed": 7}
+      {
+          "x": 0,   
+          "y": 0,  
+          "target_x": 400, 
+          "target_y": 400, 
+          "speed": 5,   
+          "heading": 45,
+          "effective_speed": 5,
+          "max_speed": 7
+      },
+      {
+          "x": 200, 
+          "y": 0,  
+          "target_x": 300, 
+          "target_y": 0,   
+          "speed": 3.5, 
+          "heading": 90,  
+          "effective_speed": 5,
+          "max_speed": 7
+      },
+      {
+          "x": 400,  
+          "y": 0,  
+          "target_x": 0,   
+          "target_y": 0,   
+          "speed": 3.5, 
+          "heading": 90,  
+          "effective_speed": 5,
+          "max_speed": 7
+      }
     ]
 }
   

@@ -1,0 +1,25 @@
+{
+    "ships": [
+      {
+          "x": 0,   
+          "y": 0,  
+          "target_x": 0, 
+          "target_y": 400, 
+          "speed": 5,   
+          "heading": 90,
+          "effective_speed": 5,
+          "max_speed": 7
+      },
+      {
+          "x": 40, 
+          "y": 150,  
+          "target_x": -100, 
+          "target_y": 150,   
+          "speed": 1, 
+          "heading": 180,  
+          "effective_speed": 5,
+          "max_speed": 7
+      }
+    ]
+}
+  
