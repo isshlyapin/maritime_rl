@@ -23,23 +23,19 @@
 
 1. **Общая ситуация** — демонстрация типичного поведения агента в морской среде:
 
-https://github.com/user-attachments/assets/ec8a419c-e30e-42bb-a50a-2e5e18e01669
-<video src="videos/last_results/env1.mp4" width="80%" controls></video>
+<video src="https://github.com/user-attachments/assets/ec8a419c-e30e-42bb-a50a-2e5e18e01669" width="80%" controls></video>
 
 2. **Обгон** — агент успешно обходит другое судно:
 
-https://github.com/user-attachments/assets/d49af6c7-6548-4407-99e5-a75b4ec6b54e
-<video src="videos/last_results/env2.mp4" width="80%" controls></video>
+<video src="https://github.com/user-attachments/assets/e6b3eebd-3981-48a8-9bcd-8911b274a063" width="80%" controls></video>
 
 3. **Боковое столкновение** — ситуация, когда агент предотвращает боковое столкновение:
 
-https://github.com/user-attachments/assets/56443cce-cd09-4f24-aab6-3ca96444923b
-<video src="videos/last_results/env3.mp4" width="80%" controls></video>
+<video src="https://github.com/user-attachments/assets/56443cce-cd09-4f24-aab6-3ca96444923b" width="80%" controls></video>
 
 4. **Лобовое столкновение** — агент избегает лобового столкновения:
 
-https://github.com/user-attachments/assets/e6b3eebd-3981-48a8-9bcd-8911b274a063   
-<video src="videos/last_results/env4.mp4" width="80%" controls></video>
+<video src="https://github.com/user-attachments/assets/d49af6c7-6548-4407-99e5-a75b4ec6b54e" width="80%" controls></video>
 
 ## Запуск
 
