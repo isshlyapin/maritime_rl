@@ -375,7 +375,7 @@ if __name__ == "__main__":
 
     # # Загружаем окружение и модель
     # generator.load_environment("env1.json")
-    generator.load_model("ship_collision_avoidance_model320.pth")
+    generator.load_model("v1_only_target_model4210.pth")
 
     # # Генерируем видео
     # generator.run_simulation(steps=400, fps=10, output_name="env1_model320.mp4")

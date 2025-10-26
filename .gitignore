@@ -1,5 +1,8 @@
 __pycache__/
-models/
-videos/
+models/*
+videos/*
 .venv/
 .vscode/
+
+!models/last_results/
+!videos/last_results/
